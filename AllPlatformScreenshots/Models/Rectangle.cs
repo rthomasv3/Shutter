@@ -1,4 +1,4 @@
-﻿namespace AllPlatformScreenshots.Models;
+﻿namespace Shutter.Models;
 
 /// <summary>
 /// Struct used for region captures.

@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Runtime.InteropServices;
 
-namespace AllPlatformScreenshots;
+namespace Shutter;
 
 internal static class DBusNative
 {

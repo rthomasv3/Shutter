@@ -1,6 +1,6 @@
-﻿using AllPlatformScreenshots.Models;
+﻿using Shutter.Models;
 
-namespace AllPlatformScreenshots.Abstractions;
+namespace Shutter.Abstractions;
 
 internal interface IPlatformScreenshotService
 {

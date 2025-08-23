@@ -1,7 +1,7 @@
 ﻿using System;
-using AllPlatformScreenshots.Enums;
+using Shutter.Enums;
 
-namespace AllPlatformScreenshots.Models;
+namespace Shutter.Models;
 
 /// <summary>
 /// Configuration options for taking screenshots.

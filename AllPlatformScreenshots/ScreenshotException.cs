@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace AllPlatformScreenshots;
+namespace Shutter;
 
 internal class ScreenshotException : Exception
 {

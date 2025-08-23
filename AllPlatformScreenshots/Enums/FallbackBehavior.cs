@@ -1,4 +1,4 @@
-﻿namespace AllPlatformScreenshots.Enums;
+﻿namespace Shutter.Enums;
 
 /// <summary>
 /// Enum used to define fallback behavior when features are not supported on a given platform.

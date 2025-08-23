@@ -1,4 +1,4 @@
-﻿namespace AllPlatformScreenshots.Enums;
+﻿namespace Shutter.Enums;
 
 /// <summary>
 /// Enum used to define supported image formats.

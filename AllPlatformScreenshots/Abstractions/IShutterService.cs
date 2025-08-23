@@ -1,11 +1,11 @@
-﻿using AllPlatformScreenshots.Models;
+﻿using Shutter.Models;
 
-namespace AllPlatformScreenshots.Abstractions;
+namespace Shutter.Abstractions;
 
 /// <summary>
 /// An interface used to define screenshot service methods.
 /// </summary>
-public interface IScreenshotService
+public interface IShutterService
 {
     /// <summary>
     /// Takes a fullscreen screenshot.

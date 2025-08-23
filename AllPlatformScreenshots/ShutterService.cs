@@ -1,14 +1,14 @@
 ﻿using System;
-using AllPlatformScreenshots.Abstractions;
-using AllPlatformScreenshots.Enums;
-using AllPlatformScreenshots.Models;
+using Shutter.Abstractions;
+using Shutter.Enums;
+using Shutter.Models;
 
-namespace AllPlatformScreenshots;
+namespace Shutter;
 
 /// <summary>
-/// Class that implements the features of a <see cref="IScreenshotService"/>.
+/// Class that implements the features of a <see cref="IShutterService"/>.
 /// </summary>
-public class ScreenshotService : IScreenshotService
+public class ShutterService : IShutterService
 {
     #region Fields
 
@@ -19,10 +19,10 @@ public class ScreenshotService : IScreenshotService
     #region Constructor(s)
 
     /// <summary>
-    /// Creates a new instance of the <see cref="ScreenshotService" class.
+    /// Creates a new instance of the <see cref="ShutterService" class.
     /// </summary>
     /// <exception cref="PlatformNotSupportedException">Thrown when the platform is unsupported.</exception>
-    public ScreenshotService()
+    public ShutterService()
     {
         if (PlatformDetector.IsWindows)
         {

@@ -1,15 +1,15 @@
 ﻿using System;
 using System.IO;
 using System.Runtime.InteropServices;
-using AllPlatformScreenshots.Abstractions;
-using AllPlatformScreenshots.Enums;
-using AllPlatformScreenshots.Models;
+using Shutter.Abstractions;
+using Shutter.Enums;
+using Shutter.Models;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.Formats.Jpeg;
 using SixLabors.ImageSharp.PixelFormats;
 
-namespace AllPlatformScreenshots;
+namespace Shutter;
 
 internal class MacOSScreenshotService : IPlatformScreenshotService
 {
