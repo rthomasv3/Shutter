@@ -22,7 +22,7 @@ internal class Program
             Target = CaptureTarget.Window,
             WindowHandle = process.MainWindowHandle,
             IncludeBorder = true,
-            IncludeShadow = true,
+            IncludeShadow = false,
             Format = ImageFormat.Jpeg,
             JpegQuality = 85
         });
