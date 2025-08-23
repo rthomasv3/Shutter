@@ -5,8 +5,8 @@ using Shutter.Abstractions;
 using Shutter.Enums;
 using Shutter.Models;
 using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.Formats.Jpeg;
+using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.PixelFormats;
 
 namespace Shutter;
@@ -25,23 +25,31 @@ internal class MacOSScreenshotService : IPlatformScreenshotService
     private static extern int dlclose(IntPtr handle);
 
     [DllImport("libSystem.dylib")]
-    private static extern IntPtr CFDataGetBytePtr(IntPtr data);
-
-    [DllImport("libSystem.dylib")]
-    private static extern long CFDataGetLength(IntPtr data);
-
-    [DllImport("libSystem.dylib")]
-    private static extern void CFRelease(IntPtr cf);
+    private static extern IntPtr dlerror();
 
     private const int RTLD_LAZY = 1;
     private const string CORE_GRAPHICS = "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics";
+    private const string CORE_FOUNDATION = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
+
+    // CoreFoundation function delegates (these need to be loaded dynamically)
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate IntPtr CFDataGetBytePtrDelegate(IntPtr data);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate long CFDataGetLengthDelegate(IntPtr data);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void CFReleaseDelegate(IntPtr cf);
 
     // CoreGraphics function delegates
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint CGMainDisplayIDDelegate();
+
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate IntPtr CGDisplayCreateImageDelegate(uint displayId);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate IntPtr CGDisplayCreateImageRectDelegate(uint displayId, CGRect rect);
+    private delegate IntPtr CGDisplayCreateImageForRectDelegate(uint displayId, CGRect rect);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void CGImageReleaseDelegate(IntPtr image);
@@ -62,7 +70,19 @@ internal class MacOSScreenshotService : IPlatformScreenshotService
     private delegate nuint CGImageGetBytesPerRowDelegate(IntPtr image);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate nuint CGImageGetBitsPerComponentDelegate(IntPtr image);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate nuint CGImageGetBitsPerPixelDelegate(IntPtr image);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint CGImageGetBitmapInfoDelegate(IntPtr image);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate IntPtr CGImageGetColorSpaceDelegate(IntPtr image);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int CGGetOnlineDisplayListDelegate(uint maxDisplays, uint[] displays, ref uint displayCount);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct CGRect
@@ -81,6 +101,12 @@ internal class MacOSScreenshotService : IPlatformScreenshotService
         }
     }
 
+    // Bitmap info flags (for determining pixel format)
+    private const uint kCGBitmapAlphaInfoMask = 0x1F;
+    private const uint kCGBitmapByteOrderMask = 0x7000;
+    private const uint kCGBitmapByteOrder32Little = 2 << 12;
+    private const uint kCGBitmapByteOrder32Big = 4 << 12;
+
     #endregion
 
     public byte[] TakeScreenshot(ScreenshotOptions options)
@@ -98,7 +124,7 @@ internal class MacOSScreenshotService : IPlatformScreenshotService
 
     private byte[] CaptureFullScreen(ScreenshotOptions options)
     {
-        // Display ID 0 means main display on macOS
+        // Use 0 to indicate main display (will be resolved to actual ID in CaptureDisplayCore)
         return CaptureDisplayCore(0, null, options);
     }
 
@@ -107,10 +133,8 @@ internal class MacOSScreenshotService : IPlatformScreenshotService
         if (!options.DisplayIndex.HasValue)
             throw new ArgumentException("DisplayIndex is required for Display capture");
 
-        // macOS display IDs typically start at 1, but we'll use the index as-is
-        // In a full implementation, you'd enumerate displays with CGGetActiveDisplayList
-        uint displayId = (uint)options.DisplayIndex.Value;
-
+        // Get the actual display ID for the given index
+        uint displayId = GetDisplayIdFromIndex(options.DisplayIndex.Value);
         return CaptureDisplayCore(displayId, null, options);
     }
 
@@ -124,13 +148,76 @@ internal class MacOSScreenshotService : IPlatformScreenshotService
         // Convert to CGRect (macOS uses floating point coordinates)
         CGRect cgRect = new CGRect(region.X, region.Y, region.Width, region.Height);
 
-        // Capture from main display (0) with the specified region
+        // Capture from main display with the specified region
         return CaptureDisplayCore(0, cgRect, options);
+    }
+
+    private uint GetDisplayIdFromIndex(int index)
+    {
+        IntPtr cgHandle = IntPtr.Zero;
+
+        try
+        {
+            cgHandle = dlopen(CORE_GRAPHICS, RTLD_LAZY);
+            if (cgHandle == IntPtr.Zero)
+                throw new ScreenshotException("Failed to load CoreGraphics framework.", "macOS");
+
+            // Try to get the display list
+            try
+            {
+                CGGetOnlineDisplayListDelegate cgGetOnlineDisplayList =
+                    GetDelegate<CGGetOnlineDisplayListDelegate>(cgHandle, "CGGetOnlineDisplayList", false);
+
+                if (cgGetOnlineDisplayList != null)
+                {
+                    uint maxDisplays = 32;
+                    uint[] displays = new uint[maxDisplays];
+                    uint displayCount = 0;
+
+                    int result = cgGetOnlineDisplayList(maxDisplays, displays, ref displayCount);
+                    if (result == 0 && index < displayCount)
+                    {
+                        return displays[index];
+                    }
+
+                    throw new ArgumentException($"Display index {index} not found. Available displays: 0-{displayCount - 1}");
+                }
+            }
+            catch (ScreenshotException)
+            {
+                // CGGetOnlineDisplayList not available, fall through to simple mapping
+            }
+
+            // Fallback: simple index to ID mapping
+            // Note: This is a simplification - display IDs don't necessarily map directly to indices
+            // but without CGGetOnlineDisplayList, we have limited options
+            if (index == 0)
+            {
+                // Try to get main display ID
+                try
+                {
+                    CGMainDisplayIDDelegate cgMainDisplayID =
+                        GetDelegate<CGMainDisplayIDDelegate>(cgHandle, "CGMainDisplayID", false);
+                    if (cgMainDisplayID != null)
+                        return cgMainDisplayID();
+                }
+                catch { }
+            }
+
+            // Last resort: use index as display ID (may not work correctly)
+            return (uint)index;
+        }
+        finally
+        {
+            if (cgHandle != IntPtr.Zero)
+                dlclose(cgHandle);
+        }
     }
 
     private byte[] CaptureDisplayCore(uint displayId, CGRect? rect, ScreenshotOptions options)
     {
         IntPtr cgHandle = IntPtr.Zero;
+        IntPtr cfHandle = IntPtr.Zero;
         IntPtr image = IntPtr.Zero;
         IntPtr dataProvider = IntPtr.Zero;
         IntPtr data = IntPtr.Zero;
@@ -142,6 +229,11 @@ internal class MacOSScreenshotService : IPlatformScreenshotService
             if (cgHandle == IntPtr.Zero)
                 throw new ScreenshotException("Failed to load CoreGraphics framework.", "macOS");
 
+            // Load CoreFoundation
+            cfHandle = dlopen(CORE_FOUNDATION, RTLD_LAZY);
+            if (cfHandle == IntPtr.Zero)
+                throw new ScreenshotException("Failed to load CoreFoundation framework.", "macOS");
+
             // Resolve CoreGraphics functions
             CGImageReleaseDelegate cgImageRelease = GetDelegate<CGImageReleaseDelegate>(cgHandle, "CGImageRelease");
             CGImageGetDataProviderDelegate cgImageGetDataProvider = GetDelegate<CGImageGetDataProviderDelegate>(cgHandle, "CGImageGetDataProvider");
@@ -149,33 +241,66 @@ internal class MacOSScreenshotService : IPlatformScreenshotService
             CGImageGetWidthDelegate cgImageGetWidth = GetDelegate<CGImageGetWidthDelegate>(cgHandle, "CGImageGetWidth");
             CGImageGetHeightDelegate cgImageGetHeight = GetDelegate<CGImageGetHeightDelegate>(cgHandle, "CGImageGetHeight");
             CGImageGetBytesPerRowDelegate cgImageGetBytesPerRow = GetDelegate<CGImageGetBytesPerRowDelegate>(cgHandle, "CGImageGetBytesPerRow");
+            CGImageGetBitsPerComponentDelegate cgImageGetBitsPerComponent = GetDelegate<CGImageGetBitsPerComponentDelegate>(cgHandle, "CGImageGetBitsPerComponent");
             CGImageGetBitsPerPixelDelegate cgImageGetBitsPerPixel = GetDelegate<CGImageGetBitsPerPixelDelegate>(cgHandle, "CGImageGetBitsPerPixel");
+
+            // Resolve CoreFoundation functions
+            CFDataGetBytePtrDelegate cfDataGetBytePtr = GetDelegate<CFDataGetBytePtrDelegate>(cfHandle, "CFDataGetBytePtr");
+            CFDataGetLengthDelegate cfDataGetLength = GetDelegate<CFDataGetLengthDelegate>(cfHandle, "CFDataGetLength");
+            CFReleaseDelegate cfRelease = GetDelegate<CFReleaseDelegate>(cfHandle, "CFRelease");
+
+            // Optional: try to get bitmap info for better pixel format handling
+            CGImageGetBitmapInfoDelegate cgImageGetBitmapInfo = null;
+            try
+            {
+                cgImageGetBitmapInfo = GetDelegate<CGImageGetBitmapInfoDelegate>(cgHandle, "CGImageGetBitmapInfo", false);
+            }
+            catch { }
+
+            // If displayId is 0, get the main display ID
+            if (displayId == 0)
+            {
+                try
+                {
+                    CGMainDisplayIDDelegate cgMainDisplayID = GetDelegate<CGMainDisplayIDDelegate>(cgHandle, "CGMainDisplayID");
+                    displayId = cgMainDisplayID();
+                }
+                catch
+                {
+                    // If CGMainDisplayID is not available, try using a large constant
+                    // that typically represents the main display
+                    displayId = 0x042728c0; // Common main display ID, but not guaranteed
+                }
+            }
 
             // Capture image based on whether we have a rect
             if (rect.HasValue)
             {
-                // Try to use CGDisplayCreateImageRect for region capture
+                // Try to use CGDisplayCreateImageForRect (correct name!)
                 try
                 {
-                    CGDisplayCreateImageRectDelegate cgDisplayCreateImageRect = GetDelegate<CGDisplayCreateImageRectDelegate>(
-                        cgHandle, "CGDisplayCreateImageRect");
-                    image = cgDisplayCreateImageRect(displayId, rect.Value);
+                    CGDisplayCreateImageForRectDelegate cgDisplayCreateImageForRect =
+                        GetDelegate<CGDisplayCreateImageForRectDelegate>(cgHandle, "CGDisplayCreateImageForRect");
+                    image = cgDisplayCreateImageForRect(displayId, rect.Value);
                 }
                 catch
                 {
-                    // If CGDisplayCreateImageRect is not available (older macOS),
-                    // fall back to capturing full display and cropping
-                    CGDisplayCreateImageDelegate cgDisplayCreateImage = GetDelegate<CGDisplayCreateImageDelegate>(
-                        cgHandle, "CGDisplayCreateImage");
+                    // If CGDisplayCreateImageForRect is not available (older macOS),
+                    // fall back to capturing full display and manually crop
+                    CGDisplayCreateImageDelegate cgDisplayCreateImage =
+                        GetDelegate<CGDisplayCreateImageDelegate>(cgHandle, "CGDisplayCreateImage");
                     image = cgDisplayCreateImage(displayId);
-                    // Note: Would need to implement cropping here
+
+                    // Note: Manual cropping would need to be implemented here
+                    // For now, we're returning the full display image
+                    // TODO: Implement manual cropping based on rect
                 }
             }
             else
             {
                 // Full display capture
-                CGDisplayCreateImageDelegate cgDisplayCreateImage = GetDelegate<CGDisplayCreateImageDelegate>(
-                    cgHandle, "CGDisplayCreateImage");
+                CGDisplayCreateImageDelegate cgDisplayCreateImage =
+                    GetDelegate<CGDisplayCreateImageDelegate>(cgHandle, "CGDisplayCreateImage");
                 image = cgDisplayCreateImage(displayId);
             }
 
@@ -187,10 +312,18 @@ internal class MacOSScreenshotService : IPlatformScreenshotService
             int height = (int)cgImageGetHeight(image);
             int bytesPerRow = (int)cgImageGetBytesPerRow(image);
             int bitsPerPixel = (int)cgImageGetBitsPerPixel(image);
+            int bitsPerComponent = (int)cgImageGetBitsPerComponent(image);
 
-            // Validate format (expect 32-bit BGRA)
-            if (bitsPerPixel != 32)
-                throw new ScreenshotException($"Unsupported bits per pixel: {bitsPerPixel}. Expected 32 (BGRA).", "macOS");
+            // Get bitmap info if available to determine pixel format
+            uint bitmapInfo = 0;
+            if (cgImageGetBitmapInfo != null)
+            {
+                bitmapInfo = cgImageGetBitmapInfo(image);
+            }
+
+            // Validate format
+            if (bitsPerPixel != 32 && bitsPerPixel != 24)
+                throw new ScreenshotException($"Unsupported bits per pixel: {bitsPerPixel}. Expected 24 or 32.", "macOS");
 
             // Get pixel data
             dataProvider = cgImageGetDataProvider(image);
@@ -201,8 +334,8 @@ internal class MacOSScreenshotService : IPlatformScreenshotService
             if (data == IntPtr.Zero)
                 throw new ScreenshotException("Failed to copy pixel data.", "macOS");
 
-            // Convert BGRA to RGBA
-            byte[] rgbaData = ConvertBgraToRgba(data, width, height, bytesPerRow);
+            // Convert to RGBA based on detected format
+            byte[] rgbaData = ConvertToRgba(data, width, height, bytesPerRow, bitsPerPixel, bitmapInfo, cfDataGetBytePtr);
 
             // Encode based on requested format
             return EncodeImage(rgbaData, width, height, options);
@@ -217,9 +350,37 @@ internal class MacOSScreenshotService : IPlatformScreenshotService
         }
         finally
         {
-            if (data != IntPtr.Zero) CFRelease(data);
-            if (dataProvider != IntPtr.Zero) CFRelease(dataProvider);
-            if (image != IntPtr.Zero) CFRelease(image);
+            // Release CoreFoundation objects using the loaded CFRelease function
+            if (cfHandle != IntPtr.Zero)
+            {
+                try
+                {
+                    CFReleaseDelegate cfRelease = GetDelegate<CFReleaseDelegate>(cfHandle, "CFRelease", false);
+                    if (cfRelease != null)
+                    {
+                        if (data != IntPtr.Zero) cfRelease(data);
+                        if (dataProvider != IntPtr.Zero) cfRelease(dataProvider);
+                    }
+                }
+                catch { }
+            }
+
+            if (image != IntPtr.Zero)
+            {
+                try
+                {
+                    // Get the release function if we haven't already
+                    if (cgHandle != IntPtr.Zero)
+                    {
+                        CGImageReleaseDelegate cgImageRelease =
+                            GetDelegate<CGImageReleaseDelegate>(cgHandle, "CGImageRelease", false);
+                        cgImageRelease?.Invoke(image);
+                    }
+                }
+                catch { }
+            }
+
+            if (cfHandle != IntPtr.Zero) dlclose(cfHandle);
             if (cgHandle != IntPtr.Zero) dlclose(cgHandle);
         }
     }
@@ -246,35 +407,98 @@ internal class MacOSScreenshotService : IPlatformScreenshotService
         return ms.ToArray();
     }
 
-    private unsafe byte[] ConvertBgraToRgba(IntPtr data, int width, int height, int bytesPerRow)
+    private unsafe byte[] ConvertToRgba(IntPtr data, int width, int height, int bytesPerRow, int bitsPerPixel, uint bitmapInfo, CFDataGetBytePtrDelegate cfDataGetBytePtr)
     {
-        byte* src = (byte*)CFDataGetBytePtr(data);
+        IntPtr srcPtr = cfDataGetBytePtr(data);
+        byte* src = (byte*)srcPtr;
         byte[] rgba = new byte[width * height * 4];
 
-        for (int y = 0; y < height; y++)
-        {
-            byte* rowSrc = src + (y * bytesPerRow);
-            int dstOffset = y * width * 4;
+        // Determine byte order from bitmap info
+        bool isLittleEndian = (bitmapInfo & kCGBitmapByteOrderMask) == kCGBitmapByteOrder32Little;
+        bool isBigEndian = (bitmapInfo & kCGBitmapByteOrderMask) == kCGBitmapByteOrder32Big;
 
-            for (int x = 0; x < width; x++)
+        // Default to BGRA for little endian or unspecified, ARGB for big endian
+        bool isBgra = !isBigEndian;
+
+        if (bitsPerPixel == 32)
+        {
+            for (int y = 0; y < height; y++)
             {
-                int srcOffset = x * 4;
-                int dstPixel = dstOffset + (x * 4);
-                rgba[dstPixel + 0] = rowSrc[srcOffset + 2]; // Red (from BGR)
-                rgba[dstPixel + 1] = rowSrc[srcOffset + 1]; // Green
-                rgba[dstPixel + 2] = rowSrc[srcOffset + 0]; // Blue
-                rgba[dstPixel + 3] = rowSrc[srcOffset + 3]; // Alpha
+                byte* rowSrc = src + (y * bytesPerRow);
+                int dstOffset = y * width * 4;
+
+                for (int x = 0; x < width; x++)
+                {
+                    int srcOffset = x * 4;
+                    int dstPixel = dstOffset + (x * 4);
+
+                    if (isBgra)
+                    {
+                        // BGRA -> RGBA
+                        rgba[dstPixel + 0] = rowSrc[srcOffset + 2]; // Red (from B_G_R_A)
+                        rgba[dstPixel + 1] = rowSrc[srcOffset + 1]; // Green
+                        rgba[dstPixel + 2] = rowSrc[srcOffset + 0]; // Blue
+                        rgba[dstPixel + 3] = rowSrc[srcOffset + 3]; // Alpha
+                    }
+                    else
+                    {
+                        // ARGB -> RGBA
+                        rgba[dstPixel + 0] = rowSrc[srcOffset + 1]; // Red (from A_R_G_B)
+                        rgba[dstPixel + 1] = rowSrc[srcOffset + 2]; // Green
+                        rgba[dstPixel + 2] = rowSrc[srcOffset + 3]; // Blue
+                        rgba[dstPixel + 3] = rowSrc[srcOffset + 0]; // Alpha
+                    }
+                }
+            }
+        }
+        else if (bitsPerPixel == 24)
+        {
+            for (int y = 0; y < height; y++)
+            {
+                byte* rowSrc = src + (y * bytesPerRow);
+                int dstOffset = y * width * 4;
+
+                for (int x = 0; x < width; x++)
+                {
+                    int srcOffset = x * 3;
+                    int dstPixel = dstOffset + (x * 4);
+
+                    if (isBgra)
+                    {
+                        // BGR -> RGBA
+                        rgba[dstPixel + 0] = rowSrc[srcOffset + 2]; // Red
+                        rgba[dstPixel + 1] = rowSrc[srcOffset + 1]; // Green
+                        rgba[dstPixel + 2] = rowSrc[srcOffset + 0]; // Blue
+                    }
+                    else
+                    {
+                        // RGB -> RGBA
+                        rgba[dstPixel + 0] = rowSrc[srcOffset + 0]; // Red
+                        rgba[dstPixel + 1] = rowSrc[srcOffset + 1]; // Green
+                        rgba[dstPixel + 2] = rowSrc[srcOffset + 2]; // Blue
+                    }
+                    rgba[dstPixel + 3] = 255; // Alpha (opaque)
+                }
             }
         }
 
         return rgba;
     }
 
-    private static T GetDelegate<T>(IntPtr handle, string symbol) where T : Delegate
+    private static T GetDelegate<T>(IntPtr handle, string symbol, bool throwOnError = true) where T : Delegate
     {
         IntPtr ptr = dlsym(handle, symbol);
         if (ptr == IntPtr.Zero)
-            throw new ScreenshotException($"Failed to resolve symbol: {symbol}.", "macOS");
+        {
+            if (throwOnError)
+            {
+                // Get error message
+                IntPtr error = dlerror();
+                string errorMsg = error != IntPtr.Zero ? Marshal.PtrToStringAnsi(error) : "Symbol not found";
+                throw new ScreenshotException($"Failed to resolve symbol '{symbol}': {errorMsg}", "macOS");
+            }
+            return null;
+        }
         return Marshal.GetDelegateForFunctionPointer<T>(ptr);
     }
 }

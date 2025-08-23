@@ -3,7 +3,21 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Title>Shutter</Title>
+    <Authors>rthomasv3</Authors>
+    <Description>A cross-platform screenshot library for .NET that supports Windows, macOS, and Linux (X11/Wayland).</Description>
+    <PackageProjectUrl>https://github.com/rthomasv3/Shutter</PackageProjectUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/rthomasv3/Shutter</RepositoryUrl>
+    <Version>1.0.0-beta-1</Version>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\README.md">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11" />

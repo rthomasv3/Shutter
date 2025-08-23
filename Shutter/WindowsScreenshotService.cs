@@ -1,6 +1,7 @@
 ﻿using System;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading;
 using Shutter.Abstractions;
 using Shutter.Enums;
 using Shutter.Models;
@@ -367,6 +368,27 @@ internal class WindowsScreenshotService : IPlatformScreenshotService
         }
 
         return rgba;
+    }
+
+    private static RECT GetWindowRect(IntPtr hwnd)
+    {
+        RECT rectangle = default;
+        int attempts = 0;
+
+        while (attempts++ < 5)
+        {
+            rectangle = new RECT();
+            GetWindowRect(hwnd, ref rectangle);
+
+            if (rectangle.Width > 0 && rectangle.Height > 0)
+            {
+                break;
+            }
+
+            Thread.Sleep(50);
+        }
+
+        return rectangle;
     }
 
     #endregion
