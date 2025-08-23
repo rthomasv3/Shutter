@@ -6,7 +6,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\AllPlatformScreenshots\Shutter.csproj" />
     <ProjectReference Include="..\Shutter\Shutter.csproj" />
   </ItemGroup>
 
