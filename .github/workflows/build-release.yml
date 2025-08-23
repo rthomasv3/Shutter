@@ -1,0 +1,100 @@
+# .github/workflows/build-release.yml
+name: Build and Release NuGet Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_notes:
+        description: 'Release notes for this version'
+        required: false
+        default: 'See commit history for changes'
+        type: string
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+    
+    - name: Restore dependencies
+      run: dotnet restore ./Shutter/Shutter.csproj
+    
+    - name: Build project
+      run: dotnet build ./Shutter/Shutter.csproj --configuration Release --no-restore
+    
+    - name: Create NuGet package
+      run: |
+        dotnet pack ./Shutter/Shutter.csproj \
+          --configuration Release \
+          --no-build \
+          --output ./artifacts \
+          -p:GenerateDocumentationFile=true
+    
+    - name: Extract version from package
+      id: get_version
+      run: |
+        # Find the .nupkg file (not the .snupkg)
+        PACKAGE_FILE=$(find ./artifacts -name "*.nupkg" -not -name "*.snupkg" | head -1)
+        echo "Found package: $PACKAGE_FILE"
+        
+        # Extract version from filename (format: Shutter.X.Y.Z.nupkg)
+        FILENAME=$(basename "$PACKAGE_FILE")
+        VERSION=$(echo "$FILENAME" | sed 's/Shutter\.\(.*\)\.nupkg/\1/')
+        echo "Version: $VERSION"
+        
+        # Set outputs
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "package_file=$PACKAGE_FILE" >> $GITHUB_OUTPUT
+        echo "package_name=$FILENAME" >> $GITHUB_OUTPUT
+    
+    - name: List artifacts
+      run: |
+        echo "Contents of artifacts directory:"
+        ls -la ./artifacts/
+    
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ steps.get_version.outputs.version }}
+        release_name: Shutter v${{ steps.get_version.outputs.version }}
+        body: |
+          ## Shutter v${{ steps.get_version.outputs.version }}
+          
+          ${{ github.event.inputs.release_notes }}
+          
+          ### Commit Info
+          - **SHA:** ${{ github.sha }}
+          - **Branch:** ${{ github.ref_name }}
+          - **Author:** ${{ github.actor }}
+        draft: true
+        prerelease: ${{ contains(steps.get_version.outputs.version, 'beta') || contains(steps.get_version.outputs.version, 'alpha') }}
+    
+    - name: Upload NuGet Package
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ${{ steps.get_version.outputs.package_file }}
+        asset_name: ${{ steps.get_version.outputs.package_name }}
+        asset_content_type: application/octet-stream
+    
+    - name: Upload artifacts to workflow
+      uses: actions/upload-artifact@v4
+      with:
+        name: nuget-packages
+        path: ./artifacts/
+        retention-days: 30

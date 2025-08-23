@@ -3,13 +3,20 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <Title>Shutter</Title>
+    <Title>Shutter - Cross-Platform Screenshot Library</Title>
     <Authors>rthomasv3</Authors>
     <Description>A cross-platform screenshot library for .NET that supports Windows, macOS, and Linux (X11/Wayland).</Description>
     <PackageProjectUrl>https://github.com/rthomasv3/Shutter</PackageProjectUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryUrl>https://github.com/rthomasv3/Shutter</RepositoryUrl>
     <Version>1.0.0-beta-1</Version>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>screenshot;screen-capture;cross-platform;windows;macos;linux;x11;wayland;imaging</PackageTags>
+    <Copyright>Copyright (c) 2025 rthomasv3</Copyright>
+
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <DocumentationFile>bin\$(Configuration)\$(TargetFramework)\$(AssemblyName).xml</DocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>
