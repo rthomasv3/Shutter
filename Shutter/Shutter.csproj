@@ -9,7 +9,7 @@
     <PackageProjectUrl>https://github.com/rthomasv3/Shutter</PackageProjectUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryUrl>https://github.com/rthomasv3/Shutter</RepositoryUrl>
-    <Version>1.0.0-beta-1</Version>
+    <Version>1.0.0</Version>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageTags>screenshot;screen-capture;cross-platform;windows;macos;linux;x11;wayland;imaging</PackageTags>
