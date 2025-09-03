@@ -109,6 +109,8 @@ internal class MacOSScreenshotService : IPlatformScreenshotService
 
     #endregion
 
+    #region Public Methods
+
     public byte[] TakeScreenshot(ScreenshotOptions options)
     {
         // Route based on target
@@ -121,6 +123,72 @@ internal class MacOSScreenshotService : IPlatformScreenshotService
             _ => throw new ArgumentException($"Unsupported capture target: {options.Target}")
         };
     }
+
+    public ScreenshotCapabilities GetCapabilities()
+    {
+        int? displayCount = null;
+        IntPtr cgHandle = IntPtr.Zero;
+
+        try
+        {
+            cgHandle = dlopen(CORE_GRAPHICS, RTLD_LAZY);
+
+            if (cgHandle != IntPtr.Zero)
+            {
+                try
+                {
+                    CGGetOnlineDisplayListDelegate cgGetOnlineDisplayList =
+                        GetDelegate<CGGetOnlineDisplayListDelegate>(cgHandle, "CGGetOnlineDisplayList", false);
+
+                    if (cgGetOnlineDisplayList != null)
+                    {
+                        uint maxDisplays = 32;
+                        uint[] displays = new uint[maxDisplays];
+                        uint macDisplayCount = 0;
+
+                        int result = cgGetOnlineDisplayList(maxDisplays, displays, ref macDisplayCount);
+
+                        if (result == 0)
+                        {
+                            displayCount = (int)macDisplayCount;
+                        }
+                    }
+                }
+                catch
+                {
+                    // If we can't get display count, leave it null
+                }
+            }
+        }
+        catch
+        {
+            // If CoreGraphics can't be loaded, leave display count null
+        }
+        finally
+        {
+            if (cgHandle != IntPtr.Zero)
+            {
+                _ = dlclose(cgHandle);
+            }
+        }
+
+        return new ScreenshotCapabilities
+        {
+            SupportsFullScreen = true,
+            SupportsWindowCapture = false,
+            SupportsDisplaySelection = true,
+            SupportsRegionCapture = true,
+            SupportsInteractiveMode = false,
+            SupportsBorderControl = false,
+            SupportsShadowControl = false,
+            SupportsDisplayCount = true,
+            DisplayCount = displayCount,
+        };
+    }
+
+    #endregion
+
+    #region Private Methods
 
     private byte[] CaptureFullScreen(ScreenshotOptions options)
     {
@@ -501,4 +569,6 @@ internal class MacOSScreenshotService : IPlatformScreenshotService
         }
         return Marshal.GetDelegateForFunctionPointer<T>(ptr);
     }
+
+    #endregion
 }

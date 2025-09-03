@@ -1,4 +1,5 @@
-﻿using Shutter.Models;
+﻿using System;
+using Shutter.Models;
 
 namespace Shutter.Abstractions;
 
@@ -28,4 +29,16 @@ public interface IShutterService
     /// </remarks>
     /// <exception cref="PlatformNotSupportedException">When requested feature isn't available and FallbackBehavior is ThrowException</exception>
     byte[] TakeScreenshot(ScreenshotOptions options);
+
+    /// <summary>
+    /// Gets the screenshot capabilities available on the current platform.
+    /// </summary>
+    /// <returns>A <see cref="ScreenshotCapabilities"/> object describing which features are supported.</returns>
+    /// <remarks>
+    /// Use this method to determine which screenshot features are available at runtime,
+    /// allowing you to adapt your logic based on platform capabilities.
+    /// This can help avoid <see cref="PlatformNotSupportedException"/> by checking
+    /// capabilities before attempting operations.
+    /// </remarks>
+    ScreenshotCapabilities GetCapabilities();
 }

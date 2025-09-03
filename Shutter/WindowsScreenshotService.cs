@@ -14,7 +14,7 @@ namespace Shutter;
 
 internal class WindowsScreenshotService : IPlatformScreenshotService
 {
-    #region Native Structures and Constants
+    #region Native Methods
 
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT
@@ -136,9 +136,54 @@ internal class WindowsScreenshotService : IPlatformScreenshotService
         return imageData;
     }
 
+    public ScreenshotCapabilities GetCapabilities()
+    {
+        int? displayCount = null;
+
+        try
+        {
+            MonitorEnumData enumData = new()
+            {
+                TargetIndex = -1,
+                CurrentIndex = 0,
+                Found = false,
+                MonitorRect = new RECT()
+            };
+
+            GCHandle handle = GCHandle.Alloc(enumData);
+
+            try
+            {
+                EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, CountMonitorsCallback, GCHandle.ToIntPtr(handle));
+                displayCount = enumData.CurrentIndex;
+            }
+            finally
+            {
+                handle.Free();
+            }
+        }
+        catch
+        {
+            // If we can't enumerate monitors, leave display count null
+        }
+
+        return new ScreenshotCapabilities
+        {
+            SupportsFullScreen = true,
+            SupportsWindowCapture = true,
+            SupportsDisplaySelection = true,
+            SupportsRegionCapture = true,
+            SupportsInteractiveMode = false,
+            SupportsBorderControl = true,
+            SupportsShadowControl = true,
+            SupportsDisplayCount = true,
+            DisplayCount = displayCount
+        };
+    }
+
     #endregion
 
-    #region Private Capture Methods
+    #region Private Methods
 
     private byte[] CaptureFullScreen(ScreenshotOptions options)
     {
@@ -249,6 +294,15 @@ internal class WindowsScreenshotService : IPlatformScreenshotService
         }
 
         return CaptureScreen(region.X, region.Y, region.Width, region.Height, options);
+    }
+
+    private static bool CountMonitorsCallback(IntPtr hMonitor, IntPtr hdcMonitor, ref RECT lprcMonitor, IntPtr dwData)
+    {
+        GCHandle handle = GCHandle.FromIntPtr(dwData);
+        MonitorEnumData data = (MonitorEnumData)handle.Target;
+
+        data.CurrentIndex++;
+        return true; // Continue enumeration
     }
 
     #endregion

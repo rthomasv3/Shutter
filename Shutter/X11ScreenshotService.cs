@@ -14,7 +14,7 @@ namespace Shutter;
 
 internal class X11ScreenshotService : IPlatformScreenshotService
 {
-    #region Native Methods and Structures
+    #region Native Methods
 
     [DllImport("libX11", EntryPoint = "XOpenDisplay")]
     private static extern IntPtr XOpenDisplay(string display_name);
@@ -129,9 +129,54 @@ internal class X11ScreenshotService : IPlatformScreenshotService
         return imageData;
     }
 
+    public ScreenshotCapabilities GetCapabilities()
+    {
+        int? displayCount = null;
+        IntPtr display = IntPtr.Zero;
+
+        try
+        {
+            display = XOpenDisplay(null);
+
+            if (display != IntPtr.Zero)
+            {
+                int screenCount = XScreenCount(display);
+
+                if (screenCount > 0)
+                {
+                    displayCount = screenCount;
+                }
+            }
+        }
+        catch
+        {
+            // If we can't query X11, leave display count null
+        }
+        finally
+        {
+            if (display != IntPtr.Zero)
+            {
+                _ = XCloseDisplay(display);
+            }
+        }
+
+        return new ScreenshotCapabilities
+        {
+            SupportsFullScreen = true,
+            SupportsWindowCapture = true,
+            SupportsDisplaySelection = true,
+            SupportsRegionCapture = true,
+            SupportsInteractiveMode = false,
+            SupportsBorderControl = false,
+            SupportsShadowControl = false,
+            SupportsDisplayCount = true,
+            DisplayCount = displayCount
+        };
+    }
+
     #endregion
 
-    #region Private Capture Methods
+    #region Private Methods
 
     private byte[] CaptureFullScreen(ScreenshotOptions options)
     {

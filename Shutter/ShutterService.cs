@@ -70,6 +70,12 @@ public class ShutterService : IShutterService
         return _platformScreenshotService.TakeScreenshot(effectiveOptions);
     }
 
+    /// <inheritdoc />
+    public ScreenshotCapabilities GetCapabilities()
+    {
+        return _platformScreenshotService.GetCapabilities();
+    }
+
     #endregion
 
     #region Private Methods

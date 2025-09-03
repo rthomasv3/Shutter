@@ -37,6 +37,22 @@ internal class WaylandScreenshotService : IPlatformScreenshotService
         return screenshotData;
     }
 
+    public ScreenshotCapabilities GetCapabilities()
+    {
+        return new ScreenshotCapabilities
+        {
+            SupportsFullScreen = true,
+            SupportsWindowCapture = false,
+            SupportsDisplaySelection = false,
+            SupportsRegionCapture = false,
+            SupportsInteractiveMode = true,
+            SupportsBorderControl = false,
+            SupportsShadowControl = false,
+            SupportsDisplayCount = false,
+            DisplayCount = null
+        };
+    }
+
     #endregion
 
     #region Private Methods
