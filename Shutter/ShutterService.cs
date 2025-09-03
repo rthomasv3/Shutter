@@ -13,6 +13,7 @@ public class ShutterService : IShutterService
     #region Fields
 
     private readonly IPlatformScreenshotService _platformScreenshotService;
+    private ScreenshotCapabilities _cachedCapabilities;
 
     #endregion
 
@@ -73,7 +74,8 @@ public class ShutterService : IShutterService
     /// <inheritdoc />
     public ScreenshotCapabilities GetCapabilities()
     {
-        return _platformScreenshotService.GetCapabilities();
+        _cachedCapabilities ??= _platformScreenshotService.GetCapabilities();
+        return _cachedCapabilities;
     }
 
     #endregion
@@ -82,156 +84,201 @@ public class ShutterService : IShutterService
 
     private ScreenshotOptions ValidateAndNormalizeOptions(ScreenshotOptions options)
     {
+        ScreenshotCapabilities capabilities = GetCapabilities();
+
         // Clone options to avoid modifying the original
-        ScreenshotOptions validatedOptions = new()
-        {
-            Target = options.Target,
-            Fallback = options.Fallback,
-            WindowHandle = options.WindowHandle,
-            DisplayIndex = options.DisplayIndex,
-            Interactive = options.Interactive,
-            Region = options.Region,
-            IncludeBorder = options.IncludeBorder,
-            IncludeShadow = options.IncludeShadow,
-            Timeout = options.Timeout,
-            Format = options.Format,
-            JpegQuality = options.JpegQuality
-        };
+        ScreenshotOptions validatedOptions = options.Clone();
 
-        switch (validatedOptions.Target)
-        {
-            case CaptureTarget.Window:
-                ValidateWindowCapture(validatedOptions);
-                break;
+        // Step 1: Validate required parameters (before capability checks)
+        ValidateRequiredParameters(validatedOptions);
 
-            case CaptureTarget.Display:
-                ValidateDisplayCapture(validatedOptions);
-                break;
+        // Step 2: Check and handle capability limitations
+        ApplyCapabilityConstraints(validatedOptions, capabilities);
 
-            case CaptureTarget.Region:
-                ValidateRegionCapture(validatedOptions);
-                break;
-
-            case CaptureTarget.FullScreen:
-                // Always supported, no validation needed
-                break;
-
-            default:
-                throw new ArgumentException($"Unknown capture target: {validatedOptions.Target}");
-        }
-
-        // Validate platform-specific modifiers
-        ValidateModifiers(validatedOptions);
+        // Step 3: Validate parameter ranges (after capability checks)
+        ValidateParameterRanges(validatedOptions, capabilities);
 
         return validatedOptions;
     }
 
-    private void ValidateWindowCapture(ScreenshotOptions options)
+    private static void ValidateRequiredParameters(ScreenshotOptions options)
     {
-        if (!options.WindowHandle.HasValue || options.WindowHandle.Value == IntPtr.Zero)
+        switch (options.Target)
         {
-            throw new ArgumentException("WindowHandle is required when Target is Window");
-        }
+            case CaptureTarget.Window:
+                if (!options.WindowHandle.HasValue || options.WindowHandle.Value == IntPtr.Zero)
+                {
+                    throw new ArgumentException("WindowHandle is required when Target is Window");
+                }
+                break;
 
-        bool isSupported = PlatformDetector.IsWindows || PlatformDetector.IsX11();
+            case CaptureTarget.Display:
+                if (!options.DisplayIndex.HasValue)
+                {
+                    throw new ArgumentException("DisplayIndex is required when Target is Display");
+                }
+                break;
 
-        if (!isSupported)
-        {
-            HandleUnsupportedFeature(options, "Window capture", "Windows and X11");
+            case CaptureTarget.Region:
+                if (!options.Region.HasValue)
+                {
+                    throw new ArgumentException("Region is required when Target is Region");
+                }
+
+                Rectangle region = options.Region.Value;
+                if (region.Width <= 0 || region.Height <= 0)
+                {
+                    throw new ArgumentException("Region must have positive width and height");
+                }
+                break;
+
+            case CaptureTarget.FullScreen:
+                // No required parameters
+                break;
+
+            default:
+                throw new ArgumentException($"Unknown capture target: {options.Target}");
         }
     }
 
-    private void ValidateDisplayCapture(ScreenshotOptions options)
+    private void ApplyCapabilityConstraints(ScreenshotOptions options, ScreenshotCapabilities capabilities)
     {
-        if (!options.DisplayIndex.HasValue)
+        bool targetSupported = IsCaptureTargetSupported(options.Target, capabilities);
+
+        if (!targetSupported)
         {
-            throw new ArgumentException("DisplayIndex is required when Target is Display");
+            string targetName = options.Target.ToString();
+            HandleUnsupportedFeature(options, capabilities, $"{targetName} capture");
         }
 
-        bool isSupported = PlatformDetector.IsWindows ||
-                           PlatformDetector.IsMacOS ||
-                           PlatformDetector.IsX11();
-
-        if (!isSupported)
+        if (options.Interactive && !capabilities.SupportsInteractiveMode)
         {
-            HandleUnsupportedFeature(options, "Display selection", "Windows, macOS, and X11");
+            HandleUnsupportedModifier(options, capabilities, "Interactive mode",
+                () => options.Interactive = false);
         }
 
-        // Note: We can't validate if the display index is valid here without 
-        // platform-specific code, so that check will happen in the platform service
-    }
-
-    private void ValidateRegionCapture(ScreenshotOptions options)
-    {
-        if (!options.Region.HasValue)
+        if (options.IncludeBorder && !capabilities.SupportsBorderControl)
         {
-            throw new ArgumentException("Region is required when Target is Region");
+            HandleUnsupportedModifier(options, capabilities, "Border control",
+                () => options.IncludeBorder = false);
         }
 
-        Rectangle region = options.Region.Value;
-
-        if (region.Width <= 0 || region.Height <= 0)
+        if (options.IncludeShadow && !capabilities.SupportsShadowControl)
         {
-            throw new ArgumentException("Region must have positive width and height");
-        }
-
-        bool isSupported = PlatformDetector.IsWindows ||
-                           PlatformDetector.IsMacOS ||
-                           PlatformDetector.IsX11();
-
-        if (!isSupported)
-        {
-            HandleUnsupportedFeature(options, "Region capture", "Windows, macOS, and X11");
+            HandleUnsupportedModifier(options, capabilities, "Shadow control",
+                () => options.IncludeShadow = false);
         }
     }
 
-    private void ValidateModifiers(ScreenshotOptions options)
+    private static void ValidateParameterRanges(ScreenshotOptions options, ScreenshotCapabilities capabilities)
     {
-        if (options.Interactive && !PlatformDetector.IsWayland())
+        if (options.Target == CaptureTarget.Display &&
+            options.DisplayIndex.HasValue &&
+            capabilities.DisplayCount.HasValue &&
+            options.DisplayIndex.Value >= capabilities.DisplayCount.Value)
         {
-            if (options.Fallback == FallbackBehavior.ThrowException)
-            {
-                throw new PlatformNotSupportedException("Interactive mode is only supported on Wayland");
-            }
-
-            options.Interactive = false;
+            throw new ArgumentException(
+                $"Display index {options.DisplayIndex.Value} is out of range. " +
+                $"Available displays: 0-{capabilities.DisplayCount.Value - 1}");
         }
 
-        bool supportsBorderControl = PlatformDetector.IsWindows || PlatformDetector.IsMacOS;
-
-        if ((options.IncludeBorder || options.IncludeShadow) && !supportsBorderControl)
+        if (options.Format == ImageFormat.Jpeg && (options.JpegQuality < 1 || options.JpegQuality > 100))
         {
-            if (options.Fallback == FallbackBehavior.ThrowException)
-            {
-                throw new PlatformNotSupportedException(
-                    "Border and shadow control is only supported on Windows and macOS");
-            }
-            // For other fallback modes, just ignore these options
-            // (they won't affect the capture on unsupported platforms)
+            throw new ArgumentException("JpegQuality must be between 1 and 100");
         }
-
-        // Timeout is primarily for Wayland interactive mode
-        // Other platforms will ignore it, so no validation needed
     }
 
-    private void HandleUnsupportedFeature(ScreenshotOptions options, string feature, string supportedPlatforms)
+    private void HandleUnsupportedFeature(ScreenshotOptions options, ScreenshotCapabilities capabilities, 
+        string featureName)
     {
         switch (options.Fallback)
         {
             case FallbackBehavior.ThrowException:
-                throw new PlatformNotSupportedException($"{feature} is only supported on {supportedPlatforms}");
+                throw new PlatformNotSupportedException($"{featureName} is not supported on the current platform");
 
             case FallbackBehavior.Default:
-            case FallbackBehavior.BestEffort:
-                // Fall back to fullscreen
+                // Simple fallback - always go to fullscreen
+                ResetTargetSpecificParameters(options, CaptureTarget.FullScreen);
                 options.Target = CaptureTarget.FullScreen;
-                options.WindowHandle = null;
-                options.DisplayIndex = null;
-                options.Region = null;
+                break;
+
+            case FallbackBehavior.BestEffort:
+                // Intelligent fallback - try to preserve as much intent as possible
+                ApplyBestEffortFallback(options, capabilities);
                 break;
 
             default:
                 throw new ArgumentException($"Unknown fallback behavior: {options.Fallback}");
+        }
+    }
+
+    private void HandleUnsupportedModifier(ScreenshotOptions options, ScreenshotCapabilities capabilities, 
+        string modifierName, Action disableModifier)
+    {
+        switch (options.Fallback)
+        {
+            case FallbackBehavior.ThrowException:
+                throw new PlatformNotSupportedException(
+                    $"{modifierName} is not supported on the current platform");
+
+            case FallbackBehavior.Default:
+            case FallbackBehavior.BestEffort:
+                disableModifier();
+                break;
+
+            default:
+                throw new ArgumentException($"Unknown fallback behavior: {options.Fallback}");
+        }
+    }
+
+    private void ApplyBestEffortFallback(ScreenshotOptions options, ScreenshotCapabilities capabilities)
+    {
+        CaptureTarget[] fallbackChain = options.Target switch
+        {
+            CaptureTarget.Window => new[] { CaptureTarget.Display, CaptureTarget.FullScreen },
+            CaptureTarget.Region => new[] { CaptureTarget.Display, CaptureTarget.FullScreen },
+            CaptureTarget.Display => new[] { CaptureTarget.FullScreen },
+            _ => new[] { CaptureTarget.FullScreen }
+        };
+
+        foreach (CaptureTarget fallbackTarget in fallbackChain)
+        {
+            if (IsCaptureTargetSupported(fallbackTarget, capabilities))
+            {
+                options.Target = fallbackTarget;
+                ResetTargetSpecificParameters(options, fallbackTarget);
+                break;
+            }
+        }
+
+        if (!IsCaptureTargetSupported(options.Target, capabilities))
+        {
+            options.Target = CaptureTarget.FullScreen;
+            ResetTargetSpecificParameters(options, CaptureTarget.FullScreen);
+        }
+    }
+
+    private static bool IsCaptureTargetSupported(CaptureTarget target, ScreenshotCapabilities capabilities)
+    {
+        return target switch
+        {
+            CaptureTarget.FullScreen => capabilities.SupportsFullScreen,
+            CaptureTarget.Window => capabilities.SupportsWindowCapture,
+            CaptureTarget.Display => capabilities.SupportsDisplaySelection,
+            CaptureTarget.Region => capabilities.SupportsRegionCapture,
+            _ => false
+        };
+    }
+
+    private static void ResetTargetSpecificParameters(ScreenshotOptions options, CaptureTarget newTarget)
+    {
+        options.WindowHandle = null;
+        options.DisplayIndex = null;
+        options.Region = null;
+
+        if (newTarget == CaptureTarget.Display)
+        {
+            options.DisplayIndex = 0;
         }
     }
 

@@ -8,6 +8,8 @@ namespace Shutter.Models;
 /// </summary>
 public class ScreenshotOptions
 {
+    #region Properties
+
     /// <summary>
     /// Gets or sets the capture target type.
     /// Default is <see cref="CaptureTarget.FullScreen"/>.
@@ -118,4 +120,19 @@ public class ScreenshotOptions
     /// Typical values: 60-70 for small size, 80-90 for good quality, 95-100 for best quality.
     /// </remarks>
     public int JpegQuality { get; set; } = 90;
+
+    #endregion
+
+    #region Public Methods
+
+    /// <summary>
+    /// Creates a shallow copy of the current <see cref="ScreenshotOptions"/> instance.
+    /// </summary>
+    /// <returns>A new <see cref="ScreenshotOptions"/> instance with the same property values.</returns>
+    public ScreenshotOptions Clone()
+    {
+        return (ScreenshotOptions)MemberwiseClone();
+    }
+
+    #endregion
 }
