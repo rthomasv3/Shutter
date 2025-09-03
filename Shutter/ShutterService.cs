@@ -19,7 +19,7 @@ public class ShutterService : IShutterService
     #region Constructor(s)
 
     /// <summary>
-    /// Creates a new instance of the <see cref="ShutterService" class.
+    /// Creates a new instance of the <see cref="ShutterService"/> class.
     /// </summary>
     /// <exception cref="PlatformNotSupportedException">Thrown when the platform is unsupported.</exception>
     public ShutterService()
